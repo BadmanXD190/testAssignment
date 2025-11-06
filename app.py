@@ -3,14 +3,14 @@ import pandas as pd
 import random
 
 # ------------------------------
-# Data loading with 5 cell edits
+# Load and modify dataset
 # ------------------------------
 @st.cache_data
 def load_data():
     df = pd.read_csv('program_ratings.csv')
     df.set_index("Type of Program", inplace=True)
 
-    # Modify exactly 5 rating cells (document these in your report)
+    # Modify exactly 5 rating cells (as per assignment)
     df.loc["news", "Hour 7"] = 0.2          # was 0.1
     df.loc["live_soccer", "Hour 21"] = 0.5  # was 0.3
     df.loc["documentary", "Hour 8"] = 0.3   # was 0.4
@@ -19,146 +19,142 @@ def load_data():
     return df
 
 ratings_df = load_data()
-programs = list(ratings_df.index)      # program labels
-hours = list(ratings_df.columns)       # Hour 6 ... Hour 23
-ratings_matrix = ratings_df.values     # fast access for GA
+programs = list(ratings_df.index)
+hours = list(ratings_df.columns)
+ratings_matrix = ratings_df.values
 
 # ------------------------------
-# Streamlit UI
+# Streamlit UI Layout
 # ------------------------------
-st.title("TV Scheduling with Genetic Algorithm")
+st.title("📺 TV Scheduling using Genetic Algorithm")
 
-# Drawer (sidebar) controls
-st.sidebar.header("Trial Parameters")
+st.sidebar.header("⚙️ Parameter Settings")
 
-# Defaults per your request
+# Defaults
 DEFAULT_CO = 0.8
-DEFAULT_MUT = 0.02  # within [0.01, 0.05]
+DEFAULT_MUT = 0.02
 
-# Trial 1
+# Trial sliders in sidebar
 st.sidebar.subheader("Trial 1")
 co_rate1 = st.sidebar.slider("Crossover Rate (Trial 1)", 0.0, 0.95, DEFAULT_CO, 0.01)
 mut_rate1 = st.sidebar.slider("Mutation Rate (Trial 1)", 0.01, 0.05, DEFAULT_MUT, 0.01)
+run_trial1 = st.sidebar.button("▶ Run Trial 1")
 
-# Trial 2
 st.sidebar.subheader("Trial 2")
 co_rate2 = st.sidebar.slider("Crossover Rate (Trial 2)", 0.0, 0.95, DEFAULT_CO, 0.01)
 mut_rate2 = st.sidebar.slider("Mutation Rate (Trial 2)", 0.01, 0.05, DEFAULT_MUT, 0.01)
+run_trial2 = st.sidebar.button("▶ Run Trial 2")
 
-# Trial 3
 st.sidebar.subheader("Trial 3")
 co_rate3 = st.sidebar.slider("Crossover Rate (Trial 3)", 0.0, 0.95, DEFAULT_CO, 0.01)
 mut_rate3 = st.sidebar.slider("Mutation Rate (Trial 3)", 0.01, 0.05, DEFAULT_MUT, 0.01)
+run_trial3 = st.sidebar.button("▶ Run Trial 3")
 
-run_btn = st.sidebar.button("Run Genetic Algorithm for 3 Trials")
+st.sidebar.markdown("---")
+run_all = st.sidebar.button("🚀 Run All 3 Trials")
 
 # ------------------------------
-# Genetic Algorithm
+# GA Functions
 # ------------------------------
 def evaluate(schedule):
-    """Total rating of a schedule (list of program indices by hour)."""
-    return sum(ratings_matrix[prog_idx][hour_idx] for hour_idx, prog_idx in enumerate(schedule))
+    """Calculate total rating."""
+    return sum(ratings_matrix[p][h] for h, p in enumerate(schedule))
 
 def per_hour_ratings(schedule):
-    """Return list of rating values corresponding to each hour choice."""
-    return [float(ratings_matrix[prog_idx][hour_idx]) for hour_idx, prog_idx in enumerate(schedule)]
+    """Return rating per hour."""
+    return [float(ratings_matrix[p][h]) for h, p in enumerate(schedule)]
 
-def select_parent(population, fitnesses):
-    """Tournament selection size=2."""
-    i, j = random.sample(range(len(population)), 2)
-    return population[i] if fitnesses[i] >= fitnesses[j] else population[j]
+def select_parent(pop, fits):
+    i, j = random.sample(range(len(pop)), 2)
+    return pop[i] if fits[i] >= fits[j] else pop[j]
 
-def crossover(parent1, parent2):
-    """One-point crossover."""
-    if len(parent1) <= 1:
-        return parent1.copy(), parent2.copy()
-    cut = random.randint(1, len(parent1) - 1)
-    return parent1[:cut] + parent2[cut:], parent2[:cut] + parent1[cut:]
+def crossover(p1, p2):
+    if len(p1) <= 1:
+        return p1.copy(), p2.copy()
+    cut = random.randint(1, len(p1) - 1)
+    return p1[:cut] + p2[cut:], p2[:cut] + p1[cut:]
 
-def mutate(individual, mutation_rate):
-    """Randomly change slot with probability = mutation_rate."""
-    for h in range(len(individual)):
-        if random.random() < mutation_rate:
-            individual[h] = random.randrange(len(programs))
+def mutate(ind, rate):
+    for h in range(len(ind)):
+        if random.random() < rate:
+            ind[h] = random.randrange(len(programs))
 
-def run_genetic_algorithm(co_rate, mut_rate, generations=100, pop_size=50, seed=None):
-    """Run GA and return schedule DataFrame plus total rating."""
-    if seed is not None:
+def run_ga(co_rate, mut_rate, generations=100, pop_size=50, seed=None):
+    if seed:
         random.seed(seed)
+    pop = [[random.randrange(len(programs)) for _ in range(len(hours))] for _ in range(pop_size)]
+    fits = [evaluate(ind) for ind in pop]
+    best = pop[fits.index(max(fits))].copy()
+    best_fit = max(fits)
 
-    # Initialize population
-    population = [[random.randrange(len(programs)) for _ in range(len(hours))]
-                  for _ in range(pop_size)]
-    fitnesses = [evaluate(ind) for ind in population]
-    best_idx = max(range(pop_size), key=lambda k: fitnesses[k])
-    best_individual = population[best_idx].copy()
-    best_fitness = fitnesses[best_idx]
-
-    # Evolution loop
     for _ in range(generations):
-        new_population = []
-        while len(new_population) < pop_size:
-            p1 = select_parent(population, fitnesses)
-            p2 = select_parent(population, fitnesses)
+        new_pop = []
+        while len(new_pop) < pop_size:
+            p1 = select_parent(pop, fits)
+            p2 = select_parent(pop, fits)
             if random.random() < co_rate:
                 c1, c2 = crossover(p1, p2)
             else:
                 c1, c2 = p1.copy(), p2.copy()
             mutate(c1, mut_rate)
             mutate(c2, mut_rate)
-            new_population.append(c1)
-            if len(new_population) < pop_size:
-                new_population.append(c2)
+            new_pop += [c1, c2][:pop_size - len(new_pop)]
 
-        # Elitism
-        new_fitnesses = [evaluate(ind) for ind in new_population]
-        worst_idx = min(range(pop_size), key=lambda k: new_fitnesses[k])
-        new_population[worst_idx] = best_individual.copy()
-        new_fitnesses[worst_idx] = best_fitness
+        new_fits = [evaluate(ind) for ind in new_pop]
+        worst = new_fits.index(min(new_fits))
+        new_pop[worst] = best.copy()
+        new_fits[worst] = best_fit
 
-        population, fitnesses = new_population, new_fitnesses
-        gen_best_idx = max(range(pop_size), key=lambda k: fitnesses[k])
-        if fitnesses[gen_best_idx] > best_fitness:
-            best_fitness = fitnesses[gen_best_idx]
-            best_individual = population[gen_best_idx].copy()
+        pop, fits = new_pop, new_fits
+        gen_best = max(fits)
+        if gen_best > best_fit:
+            best_fit = gen_best
+            best = pop[fits.index(gen_best)].copy()
 
-    # Build result table with Hour, Program, Rating columns
-    chosen_programs = [programs[idx] for idx in best_individual]
-    ratings_each_hour = per_hour_ratings(best_individual)
-
-    schedule_df = pd.DataFrame({
+    best_programs = [programs[i] for i in best]
+    hour_ratings = per_hour_ratings(best)
+    df = pd.DataFrame({
         "Hour": hours,
-        "Program": chosen_programs,
-        "Rating": [round(r, 3) for r in ratings_each_hour]
+        "Program": best_programs,
+        "Rating": [round(r, 3) for r in hour_ratings]
     })
-    return schedule_df, best_fitness
+    return df, best_fit
 
 # ------------------------------
-# Run & Display
+# Display Results
 # ------------------------------
-if run_btn:
-    # You can fix seeds if you want repeatability per trial
-    result1, fitness1 = run_genetic_algorithm(co_rate1, mut_rate1, seed=1)
-    result2, fitness2 = run_genetic_algorithm(co_rate2, mut_rate2, seed=2)
-    result3, fitness3 = run_genetic_algorithm(co_rate3, mut_rate3, seed=3)
+def show_results(title, co, mut, df, fitness):
+    st.subheader(f"{title} (CO_R={co:.2f}, MUT_R={mut:.2f})")
+    st.dataframe(df, use_container_width=True)
+    st.markdown(f"**Total Rating:** {fitness:.3f}")
 
-    st.subheader(f"Trial 1 (CO_R={co_rate1:.2f}, MUT_R={mut_rate1:.2f})")
-    st.dataframe(result1, use_container_width=True)
-    st.markdown(f"**Total Rating:** {fitness1:.3f}")
+# Run individual or all
+if run_trial1:
+    df1, fit1 = run_ga(co_rate1, mut_rate1, seed=1)
+    show_results("Trial 1 Results", co_rate1, mut_rate1, df1, fit1)
 
-    st.subheader(f"Trial 2 (CO_R={co_rate2:.2f}, MUT_R={mut_rate2:.2f})")
-    st.dataframe(result2, use_container_width=True)
-    st.markdown(f"**Total Rating:** {fitness2:.3f}")
+if run_trial2:
+    df2, fit2 = run_ga(co_rate2, mut_rate2, seed=2)
+    show_results("Trial 2 Results", co_rate2, mut_rate2, df2, fit2)
 
-    st.subheader(f"Trial 3 (CO_R={co_rate3:.2f}, MUT_R={mut_rate3:.2f})")
-    st.dataframe(result3, use_container_width=True)
-    st.markdown(f"**Total Rating:** {fitness3:.3f}")
+if run_trial3:
+    df3, fit3 = run_ga(co_rate3, mut_rate3, seed=3)
+    show_results("Trial 3 Results", co_rate3, mut_rate3, df3, fit3)
 
-    st.subheader("Summary of Trial Parameters")
-    summary_df = pd.DataFrame({
+if run_all:
+    df1, fit1 = run_ga(co_rate1, mut_rate1, seed=1)
+    df2, fit2 = run_ga(co_rate2, mut_rate2, seed=2)
+    df3, fit3 = run_ga(co_rate3, mut_rate3, seed=3)
+
+    show_results("Trial 1 Results", co_rate1, mut_rate1, df1, fit1)
+    show_results("Trial 2 Results", co_rate2, mut_rate2, df2, fit2)
+    show_results("Trial 3 Results", co_rate3, mut_rate3, df3, fit3)
+
+    st.subheader("Summary of All Trials")
+    summary = pd.DataFrame({
         "Trial": [1, 2, 3],
         "Crossover Rate": [co_rate1, co_rate2, co_rate3],
         "Mutation Rate": [mut_rate1, mut_rate2, mut_rate3],
-        "Total Rating": [round(fitness1, 3), round(fitness2, 3), round(fitness3, 3)]
+        "Total Rating": [round(fit1, 3), round(fit2, 3), round(fit3, 3)]
     })
-    st.dataframe(summary_df, use_container_width=True)
+    st.dataframe(summary, use_container_width=True)
