@@ -29,7 +29,7 @@ ratings_matrix = ratings_df.values
 # Session state init
 # ==============================
 if "results" not in st.session_state:
-    st.session_state.results = {}
+    st.session_state.results = {}  # "Trial 1" -> (df, total_rating, co, mut)
 
 if "saved_df" not in st.session_state:
     st.session_state.saved_df = pd.DataFrame(
@@ -40,7 +40,7 @@ if "saved_df" not in st.session_state:
     )
 
 # ==============================
-# Helpers
+# GA helpers
 # ==============================
 def evaluate(schedule):
     return sum(ratings_matrix[prog_idx][hour_idx] for hour_idx, prog_idx in enumerate(schedule))
@@ -120,7 +120,7 @@ def all_saved_to_csv_bytes(saved_df: pd.DataFrame):
 def add_trial_to_saved(trial_name: str, df: pd.DataFrame, total_rating: float, co: float, mut: float):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     add_df = df.copy()
-    add_df.insert(0, "Trial", trial_name)
+    add_df.insert(0, "Trial", trial_name)  # Trial 1 / Trial 2 / Trial 3
     add_df.insert(0, "Saved At", ts)
     add_df["Crossover Rate"] = round(co, 4)
     add_df["Mutation Rate"] = round(mut, 4)
@@ -142,7 +142,7 @@ DEFAULT_MUT = 0.02
 
 if page == "Run Trials":
     # --------------------------
-    # Run Trials controls
+    # Controls
     # --------------------------
     st.sidebar.subheader("Trial 1")
     co_rate1 = st.sidebar.slider("Crossover Rate (Trial 1)", 0.0, 0.95, DEFAULT_CO, 0.01, key="co1")
@@ -238,29 +238,37 @@ if page == "Run Trials":
 
 else:
     # ==========================
-    # Saved Results page
+    # Saved Results page (select trials, not rows)
     # ==========================
     st.header("💾 Saved Results")
 
     if st.session_state.saved_df.empty:
         st.info("No saved results yet. Go to 'Run Trials' and click 'Save Results'.")
     else:
+        # Show saved data
         st.dataframe(st.session_state.saved_df, use_container_width=True)
-        st.markdown("**Select rows to delete**")
-        selected_indices = st.multiselect(
-            "Choose row indices",
-            options=list(st.session_state.saved_df.index),
-            help="Select one or more rows to delete"
+
+        # Unique trials available in saved results
+        trials_available = sorted(st.session_state.saved_df["Trial"].unique().tolist())
+
+        st.markdown("**Select trial(s) to delete or download**")
+        selected_trials = st.multiselect(
+            "Choose trial(s)",
+            options=trials_available,
+            default=[],
+            help="Operate on whole trials instead of individual rows"
         )
 
         cols = st.columns([1, 1, 2, 2])
         with cols[0]:
-            if st.button("🗑️ Delete Selected"):
-                if len(selected_indices) > 0:
-                    st.session_state.saved_df = st.session_state.saved_df.drop(index=selected_indices).reset_index(drop=True)
-                    st.success("Selected rows deleted.")
+            if st.button("🗑️ Delete Selected Trial(s)"):
+                if selected_trials:
+                    st.session_state.saved_df = st.session_state.saved_df[
+                        ~st.session_state.saved_df["Trial"].isin(selected_trials)
+                    ].reset_index(drop=True)
+                    st.success(f"Deleted: {', '.join(selected_trials)}")
                 else:
-                    st.warning("No rows selected.")
+                    st.warning("No trials selected.")
 
         with cols[1]:
             if st.button("🧹 Clear All Saved"):
@@ -268,21 +276,25 @@ else:
                 st.success("All saved results cleared.")
 
         with cols[2]:
+            # Download ALL saved
             st.download_button(
-                "⬇️ Download Saved as CSV",
+                "⬇️ Download All Saved (CSV)",
                 data=all_saved_to_csv_bytes(st.session_state.saved_df),
                 file_name="saved_trials_combined.csv",
                 mime="text/csv",
             )
 
         with cols[3]:
-            if len(selected_indices) > 0:
-                sel_df = st.session_state.saved_df.loc[selected_indices].reset_index(drop=True)
+            # Download only selected trials
+            if selected_trials:
+                sel_df = st.session_state.saved_df[
+                    st.session_state.saved_df["Trial"].isin(selected_trials)
+                ].reset_index(drop=True)
                 st.download_button(
-                    "⬇️ Download Selected Rows",
+                    "⬇️ Download Selected Trial(s)",
                     data=all_saved_to_csv_bytes(sel_df),
                     file_name="saved_trials_selected.csv",
                     mime="text/csv",
                 )
             else:
-                st.caption("Select rows to enable 'Download Selected Rows'.")
+                st.caption("Select trial(s) to enable 'Download Selected Trial(s)'.")
