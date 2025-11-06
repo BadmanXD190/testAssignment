@@ -267,8 +267,10 @@ else:
                         ~st.session_state.saved_df["Trial"].isin(selected_trials)
                     ].reset_index(drop=True)
                     st.success(f"Deleted: {', '.join(selected_trials)}")
+                    st.rerun()  # 🔁 instantly refresh page
                 else:
                     st.warning("No trials selected.")
+
 
         with cols[1]:
             if st.button("🧹 Clear All Saved"):
