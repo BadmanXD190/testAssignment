@@ -38,7 +38,7 @@ DEFAULT_MUT = 0.02  # within [0.01, 0.05]
 # Trial 1
 st.sidebar.subheader("Trial 1")
 co_rate1 = st.sidebar.slider("Crossover Rate (Trial 1)", 0.0, 0.95, DEFAULT_CO, 0.01)
-mut_rate1 = st.sidebar.slider("Mutation Rate (Trial 1)", 0.01, 0.2, DEFAULT_MUT, 0.01)
+mut_rate1 = st.sidebar.slider("Mutation Rate (Trial 1)", 0.01, 0.05, DEFAULT_MUT, 0.01)
 
 # Trial 2
 st.sidebar.subheader("Trial 2")
