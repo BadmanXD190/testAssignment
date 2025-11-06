@@ -5,46 +5,43 @@ import math
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
+from pathlib import Path
+
+# ==============================
+# CONFIG: CSV filename to load
+# ==============================
+CSV_FILENAME = "modified_program_ratings.csv"  # <- manually edited file
 
 # ==============================
 # ORIGINAL-STYLE DATA LOADING
 # ==============================
-
 @st.cache_data
 def read_csv_to_dict(file_path: str):
+    """Read CSV (Type of Program, Hour 6..Hour 23) into {program: [float,...]}."""
     program_ratings = {}
     with open(file_path, mode='r', newline='') as file:
         reader = csv.reader(file)
-        header = next(reader)  # ['Type of Program', 'Hour 6', ... 'Hour 23']
+        header = next(reader)  # ['Type of Program', 'Hour 6', ..., 'Hour 23']
         for row in reader:
             program = row[0]
-            ratings = [float(x) for x in row[1:]]  # 18 numbers for hours 6..23
+            ratings = [float(x) for x in row[1:]]
             program_ratings[program] = ratings
     return program_ratings, header
 
 @st.cache_data
-def load_and_modify_original_style(csv_path="program_ratings.csv"):
+def load_original_style(csv_path=CSV_FILENAME):
+    """Load ratings dict and header without any programmatic edits."""
     ratings_dict, header = read_csv_to_dict(csv_path)
-
-    # Hour mapping: Hour 6..23 -> indices 0..17
-    hour_to_idx = {h: (h - 6) for h in range(6, 24)}
-
-    # Exactly 5 cell edits (document these in your report)
-    # Make sure program keys match your CSV exactly.
-    if "news" in ratings_dict:
-        ratings_dict["news"][hour_to_idx[7]] = 0.2          # Hour 7
-    if "live_soccer" in ratings_dict:
-        ratings_dict["live_soccer"][hour_to_idx[21]] = 0.5  # Hour 21
-    if "documentary" in ratings_dict:
-        ratings_dict["documentary"][hour_to_idx[8]] = 0.3   # Hour 8
-    if "tv_series_a" in ratings_dict:
-        ratings_dict["tv_series_a"][hour_to_idx[20]] = 0.5  # Hour 20
-    if "music_program" in ratings_dict:
-        ratings_dict["music_program"][hour_to_idx[22]] = 0.4  # Hour 22
-
     return ratings_dict, header
 
-ratings, header = load_and_modify_original_style()
+# try to load; if not found, show a clear message
+if not Path(CSV_FILENAME).exists():
+    st.error(
+        f"CSV file '{CSV_FILENAME}' not found. "
+        "Please upload it (same folder as app.py) or rename your file to this name."
+    )
+
+ratings, header = load_original_style() if Path(CSV_FILENAME).exists() else ({}, [])
 
 # ==============================
 # ORIGINAL CONSTANTS
@@ -52,44 +49,39 @@ ratings, header = load_and_modify_original_style()
 GEN = 100
 POP = 50
 CO_R_DEFAULT = 0.8
-MUT_R_DEFAULT = 0.02  # (assignment wants 0.01..0.05; default 0.02)
+MUT_R_DEFAULT = 0.02  # allowed range 0.01..0.05
 EL_S = 2
 
-all_programs = list(ratings.keys())             # all programs (names)
-all_time_slots = list(range(6, 24))             # 6..23 inclusive, 18 slots
+all_programs = list(ratings.keys())
+all_time_slots = list(range(6, 24))             # 18 slots: 6..23
 HOURS_LABELS = [f"Hour {h}" for h in all_time_slots]
 
 # ==============================
 # ORIGINAL FUNCTIONS (with safety)
 # ==============================
-
 def fitness_function(schedule):
-    """Sum of ratings across time slots for a schedule of program names."""
+    """Sum ratings across time slots for a schedule of program names."""
     total_rating = 0.0
     for time_slot, program in enumerate(schedule):
         total_rating += ratings[program][time_slot]
     return total_rating
 
-# SAFETY: naive recursion/permutations explode quickly.
-# We cap brute force, else fall back to greedy initializer.
+# Avoid factorial blowups when generating all permutations
 MAX_PERMUTATIONS = 40320  # 8!
 
 def initialize_pop(programs, time_slots):
-    """Original intent: generate ALL permutations of `programs`.
-       Safety: if factorial(len(programs)) too big, return a single greedy schedule."""
+    """Original intent: generate ALL permutations; fall back to greedy if too large."""
     n = len(programs)
     if n == 0:
         return [[]]
     if math.factorial(n) <= MAX_PERMUTATIONS:
-        # Efficiently use itertools.permutations instead of recursion
         from itertools import permutations
-        # Only consider first len(time_slots) positions
         all_schedules = []
         for perm in permutations(programs, min(n, len(time_slots))):
             all_schedules.append(list(perm))
         return all_schedules
     else:
-        # Greedy fallback: at each time slot, pick best remaining program for that slot
+        # Greedy fallback: pick best remaining for each time slot
         remaining = programs[:]
         schedule = []
         for t in range(min(len(time_slots), len(programs))):
@@ -130,8 +122,7 @@ def evaluate_fitness(schedule):
 def genetic_algorithm(initial_schedule, generations=GEN, population_size=POP,
                       crossover_rate=CO_R_DEFAULT, mutation_rate=MUT_R_DEFAULT,
                       elitism_size=EL_S):
-
-    # Start population with shuffled variants of initial_schedule (original behavior)
+    # Start with shuffled variants of the initial schedule (original behavior)
     population = [initial_schedule[:]]
     for _ in range(population_size - 1):
         s = initial_schedule[:]
@@ -140,36 +131,31 @@ def genetic_algorithm(initial_schedule, generations=GEN, population_size=POP,
 
     for _ in range(generations):
         new_population = []
-
-        # Elitism: keep the top-K schedules
+        # Elitism
         population.sort(key=lambda sch: fitness_function(sch), reverse=True)
         new_population.extend(population[:elitism_size])
 
-        # Fill the rest
+        # Fill with crossover/mutation
         while len(new_population) < population_size:
             parent1, parent2 = random.choices(population, k=2)
             if random.random() < crossover_rate:
                 child1, child2 = crossover(parent1, parent2)
             else:
                 child1, child2 = parent1[:], parent2[:]
-
             if random.random() < mutation_rate:
                 child1 = mutate(child1)
             if random.random() < mutation_rate:
                 child2 = mutate(child2)
-
             new_population.extend([child1, child2])
 
         population = new_population[:population_size]
 
-    return population[0]  # return best (population was sorted by elitism every gen)
+    return population[0]
 
 # ==============================
-# HELPERS FOR DISPLAY
+# HELPERS
 # ==============================
-
 def build_result_df(schedule):
-    """Create table Hour, Program, Rating using ratings dict."""
     rows = []
     for idx, prog in enumerate(schedule):
         hour_label = HOURS_LABELS[idx] if idx < len(HOURS_LABELS) else f"Hour {6+idx}"
@@ -178,12 +164,7 @@ def build_result_df(schedule):
     return pd.DataFrame(rows)
 
 def run_pipeline(co_rate, mut_rate, seed=None):
-    """Replicate your original pipeline:
-       1) all_possible_schedules = initialize_pop(all_programs, all_time_slots)
-       2) initial_best_schedule = finding_best_schedule(all_possible_schedules)
-       3) genetic_schedule = genetic_algorithm(initial_best_schedule, ...)
-       4) final = initial_best_schedule + genetic_schedule[:rem_t_slots]
-    """
+    """Original pipeline with final concatenation."""
     if seed is not None:
         random.seed(seed)
 
@@ -220,11 +201,21 @@ def all_saved_to_csv_bytes(saved_df: pd.DataFrame):
     saved_df.to_csv(b, index=False)
     return b.getvalue()
 
+def export_loaded_csv_bytes():
+    """Export exactly what the app loaded (no edits)."""
+    b = BytesIO()
+    header = ["Type of Program"] + HOURS_LABELS
+    writer_lines = [",".join(header)]
+    for prog, vals in ratings.items():
+        row = [prog] + [str(v) for v in vals]
+        writer_lines.append(",".join(row))
+    b.write(("\n".join(writer_lines)).encode("utf-8"))
+    return b.getvalue()
+
 # ==============================
 # STREAMLIT UI
 # ==============================
-
-st.title("📺 TV Scheduling (Original GA Logic)")
+st.title("📺 TV Scheduling (Original GA Logic, Loading 'modified_program_ratings.csv')")
 
 # Page switcher
 st.sidebar.header("📄 Page")
@@ -232,7 +223,7 @@ page = st.sidebar.radio("Go to", ["Run Trials", "Saved Results"], index=0)
 
 # Hold computed results and saved results
 if "results" not in st.session_state:
-    st.session_state.results = {}  # "Trial 1" -> (df, total, co, mut)
+    st.session_state.results = {}  # "Trial X" -> (df, total, co, mut)
 if "saved_df" not in st.session_state:
     st.session_state.saved_df = pd.DataFrame(
         columns=["Saved At", "Trial", "Hour", "Program", "Rating", "Crossover Rate", "Mutation Rate", "Total Rating"]
@@ -247,7 +238,6 @@ DEFAULT_MUT = MUT_R_DEFAULT
 if page == "Run Trials":
     st.sidebar.header("⚙️ Parameters")
 
-    # Trial sliders + buttons
     controls = []
     for i in range(1, 4):
         st.sidebar.subheader(f"Trial {i}")
@@ -258,22 +248,11 @@ if page == "Run Trials":
     st.sidebar.markdown("---")
     run_all = st.sidebar.button("🚀 Run All 3 Trials")
 
-    # Download modified CSV (original structure, with 5 edits applied)
-    def export_modified_csv_bytes():
-        b = BytesIO()
-        # Recompose CSV in the same shape as input: Type of Program + 18 hour columns
-        header = ["Type of Program"] + HOURS_LABELS
-        writer_lines = [",".join(header)]
-        for prog, vals in ratings.items():
-            row = [prog] + [str(v) for v in vals]
-            writer_lines.append(",".join(row))
-        b.write(("\n".join(writer_lines)).encode("utf-8"))
-        return b.getvalue()
-
+    # Download the loaded CSV (for your GitHub submission convenience)
     st.sidebar.download_button(
-        "⬇️ Download Modified CSV",
-        data=export_modified_csv_bytes(),
-        file_name="program_ratings_modified.csv",
+        "⬇️ Download Currently Loaded CSV",
+        data=export_loaded_csv_bytes(),
+        file_name="modified_program_ratings_export.csv",
         mime="text/csv",
     )
 
@@ -305,23 +284,23 @@ if page == "Run Trials":
 
     # Run individual trials
     for i, (co, mut, run_btn) in enumerate(controls, start=1):
-        if run_btn:
+        if run_btn and ratings:
             df, total = run_pipeline(co, mut, seed=i)
             st.session_state.results[f"Trial {i}"] = (df, total, co, mut)
 
     # Run all
-    if run_all:
+    if run_all and ratings:
         for i, (co, mut, _) in enumerate(controls, start=1):
             df, total = run_pipeline(co, mut, seed=i)
             st.session_state.results[f"Trial {i}"] = (df, total, co, mut)
 
-    # Show any stored results
+    # Show results
     for trial_name in ["Trial 1", "Trial 2", "Trial 3"]:
         if trial_name in st.session_state.results:
             df, total, co, mut = st.session_state.results[trial_name]
             show_results_block(f"{trial_name} Results", co, mut, df, total)
 
-    # Summary table
+    # Summary
     if len(st.session_state.results) >= 2:
         st.subheader("Summary of Completed Trials")
         summary = pd.DataFrame([
@@ -368,7 +347,7 @@ else:
                         ~st.session_state.saved_df["Trial"].isin(selected_trials)
                     ].reset_index(drop=True)
                     st.success(f"Deleted: {', '.join(selected_trials)}")
-                    st.rerun()  # instant refresh
+                    st.rerun()
                 else:
                     st.warning("No trials selected.")
 
