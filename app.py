@@ -10,18 +10,18 @@ from pathlib import Path
 # ==============================
 # CONFIG: CSV filename to load
 # ==============================
-CSV_FILENAME = "modified_program_ratings.csv"  # <- manually edited file
+CSV_FILENAME = "modified_program_ratings.csv"  # <- load your modified file
 
 # ==============================
 # ORIGINAL-STYLE DATA LOADING
 # ==============================
 @st.cache_data
 def read_csv_to_dict(file_path: str):
-    """Read CSV (Type of Program, Hour 6..Hour 23) into {program: [float,...]}."""
+    """Read CSV into {program: [float,...]}."""
     program_ratings = {}
     with open(file_path, mode='r', newline='') as file:
         reader = csv.reader(file)
-        header = next(reader)  # ['Type of Program', 'Hour 6', ..., 'Hour 23']
+        header = next(reader)
         for row in reader:
             program = row[0]
             ratings = [float(x) for x in row[1:]]
@@ -29,48 +29,43 @@ def read_csv_to_dict(file_path: str):
     return program_ratings, header
 
 @st.cache_data
-def load_original_style(csv_path=CSV_FILENAME):
-    """Load ratings dict and header without any programmatic edits."""
+def load_ratings(csv_path=CSV_FILENAME):
     ratings_dict, header = read_csv_to_dict(csv_path)
     return ratings_dict, header
 
-# try to load; if not found, show a clear message
 if not Path(CSV_FILENAME).exists():
     st.error(
         f"CSV file '{CSV_FILENAME}' not found. "
-        "Please upload it (same folder as app.py) or rename your file to this name."
+        "Please upload it or rename your file to this name."
     )
 
-ratings, header = load_original_style() if Path(CSV_FILENAME).exists() else ({}, [])
+ratings, header = load_ratings() if Path(CSV_FILENAME).exists() else ({}, [])
 
 # ==============================
-# ORIGINAL CONSTANTS
+# GA PARAMETERS
 # ==============================
 GEN = 100
 POP = 50
 CO_R_DEFAULT = 0.8
-MUT_R_DEFAULT = 0.02  # allowed range 0.01..0.05
+MUT_R_DEFAULT = 0.02
 EL_S = 2
 
 all_programs = list(ratings.keys())
-all_time_slots = list(range(6, 24))             # 18 slots: 6..23
+all_time_slots = list(range(6, 24))
 HOURS_LABELS = [f"Hour {h}" for h in all_time_slots]
 
 # ==============================
-# ORIGINAL FUNCTIONS (with safety)
+# ORIGINAL FUNCTIONS
 # ==============================
 def fitness_function(schedule):
-    """Sum ratings across time slots for a schedule of program names."""
     total_rating = 0.0
     for time_slot, program in enumerate(schedule):
         total_rating += ratings[program][time_slot]
     return total_rating
 
-# Avoid factorial blowups when generating all permutations
-MAX_PERMUTATIONS = 40320  # 8!
+MAX_PERMUTATIONS = 40320  # safety cap
 
 def initialize_pop(programs, time_slots):
-    """Original intent: generate ALL permutations; fall back to greedy if too large."""
     n = len(programs)
     if n == 0:
         return [[]]
@@ -81,7 +76,6 @@ def initialize_pop(programs, time_slots):
             all_schedules.append(list(perm))
         return all_schedules
     else:
-        # Greedy fallback: pick best remaining for each time slot
         remaining = programs[:]
         schedule = []
         for t in range(min(len(time_slots), len(programs))):
@@ -116,13 +110,10 @@ def mutate(schedule):
     schedule[mutation_point] = new_program
     return schedule
 
-def evaluate_fitness(schedule):
-    return fitness_function(schedule)
-
 def genetic_algorithm(initial_schedule, generations=GEN, population_size=POP,
                       crossover_rate=CO_R_DEFAULT, mutation_rate=MUT_R_DEFAULT,
                       elitism_size=EL_S):
-    # Start with shuffled variants of the initial schedule (original behavior)
+
     population = [initial_schedule[:]]
     for _ in range(population_size - 1):
         s = initial_schedule[:]
@@ -131,11 +122,9 @@ def genetic_algorithm(initial_schedule, generations=GEN, population_size=POP,
 
     for _ in range(generations):
         new_population = []
-        # Elitism
         population.sort(key=lambda sch: fitness_function(sch), reverse=True)
         new_population.extend(population[:elitism_size])
 
-        # Fill with crossover/mutation
         while len(new_population) < population_size:
             parent1, parent2 = random.choices(population, k=2)
             if random.random() < crossover_rate:
@@ -149,7 +138,6 @@ def genetic_algorithm(initial_schedule, generations=GEN, population_size=POP,
             new_population.extend([child1, child2])
 
         population = new_population[:population_size]
-
     return population[0]
 
 # ==============================
@@ -164,13 +152,10 @@ def build_result_df(schedule):
     return pd.DataFrame(rows)
 
 def run_pipeline(co_rate, mut_rate, seed=None):
-    """Original pipeline with final concatenation."""
     if seed is not None:
         random.seed(seed)
-
     all_possible_schedules = initialize_pop(all_programs, all_time_slots)
     initial_best_schedule = finding_best_schedule(all_possible_schedules)
-
     rem_t_slots = len(all_time_slots) - len(initial_best_schedule)
     ga_schedule = genetic_algorithm(
         initial_best_schedule,
@@ -180,7 +165,6 @@ def run_pipeline(co_rate, mut_rate, seed=None):
         mutation_rate=mut_rate,
         elitism_size=EL_S,
     )
-
     final_schedule = initial_best_schedule + ga_schedule[:max(0, rem_t_slots)]
     df = build_result_df(final_schedule)
     total = fitness_function(final_schedule)
@@ -201,77 +185,51 @@ def all_saved_to_csv_bytes(saved_df: pd.DataFrame):
     saved_df.to_csv(b, index=False)
     return b.getvalue()
 
-def export_loaded_csv_bytes():
-    """Export exactly what the app loaded (no edits)."""
-    b = BytesIO()
-    header = ["Type of Program"] + HOURS_LABELS
-    writer_lines = [",".join(header)]
-    for prog, vals in ratings.items():
-        row = [prog] + [str(v) for v in vals]
-        writer_lines.append(",".join(row))
-    b.write(("\n".join(writer_lines)).encode("utf-8"))
-    return b.getvalue()
-
 # ==============================
 # STREAMLIT UI
 # ==============================
-st.title("📺 TV Scheduling (Original GA Logic, Loading 'modified_program_ratings.csv')")
+st.title("TV Program Scheduling using Genetic Algorithm")
 
 # Page switcher
-st.sidebar.header("📄 Page")
-page = st.sidebar.radio("Go to", ["Run Trials", "Saved Results"], index=0)
+st.sidebar.header("Navigation")
+page = st.sidebar.radio("Select Page", ["Run Trials", "Saved Results"], index=0)
 
-# Hold computed results and saved results
 if "results" not in st.session_state:
-    st.session_state.results = {}  # "Trial X" -> (df, total, co, mut)
+    st.session_state.results = {}
 if "saved_df" not in st.session_state:
     st.session_state.saved_df = pd.DataFrame(
         columns=["Saved At", "Trial", "Hour", "Program", "Rating", "Crossover Rate", "Mutation Rate", "Total Rating"]
     )
 
-DEFAULT_CO = CO_R_DEFAULT
-DEFAULT_MUT = MUT_R_DEFAULT
-
 # -----------------------------
 # RUN TRIALS PAGE
 # -----------------------------
 if page == "Run Trials":
-    st.sidebar.header("⚙️ Parameters")
-
+    st.sidebar.header("Parameter Settings")
     controls = []
     for i in range(1, 4):
         st.sidebar.subheader(f"Trial {i}")
-        co = st.sidebar.slider(f"Crossover Rate (Trial {i})", 0.0, 0.95, DEFAULT_CO, 0.01, key=f"co{i}")
-        mut = st.sidebar.slider(f"Mutation Rate (Trial {i})", 0.01, 0.05, DEFAULT_MUT, 0.01, key=f"mut{i}")
-        run_btn = st.sidebar.button(f"▶ Run Trial {i}", key=f"btn{i}")
+        co = st.sidebar.slider(f"Crossover Rate (Trial {i})", 0.0, 0.95, CO_R_DEFAULT, 0.01, key=f"co{i}")
+        mut = st.sidebar.slider(f"Mutation Rate (Trial {i})", 0.01, 0.05, MUT_R_DEFAULT, 0.01, key=f"mut{i}")
+        run_btn = st.sidebar.button(f"Run Trial {i}", key=f"btn{i}")
         controls.append((co, mut, run_btn))
     st.sidebar.markdown("---")
-    run_all = st.sidebar.button("🚀 Run All 3 Trials")
-
-    # Download the loaded CSV (for your GitHub submission convenience)
-    st.sidebar.download_button(
-        "⬇️ Download Currently Loaded CSV",
-        data=export_loaded_csv_bytes(),
-        file_name="modified_program_ratings_export.csv",
-        mime="text/csv",
-    )
+    run_all = st.sidebar.button("Run All 3 Trials")
 
     def show_results_block(title, co, mut, df, total):
-        st.subheader(f"{title} (CO_R={co:.2f}, MUT_R={mut:.2f})")
+        st.subheader(f"{title} (Crossover={co:.2f}, Mutation={mut:.2f})")
         st.dataframe(df, use_container_width=True)
         st.markdown(f"**Total Rating:** {total:.3f}")
-
         c1, c2, _ = st.columns([1, 1, 3])
         with c1:
             st.download_button(
-                label="Download Trial CSV",
-                data=schedule_df_to_csv_bytes(df, title.replace(" Results", ""), co, mut, total),
+                label="Download CSV",
+                data=schedule_df_to_csv_bytes(df, title.replace(' Results', ''), co, mut, total),
                 file_name=f"{title.replace(' ', '_').lower()}.csv",
                 mime="text/csv",
-                key=f"dl_{title}",
             )
         with c2:
-            if st.button("💾 Save Results", key=f"save_{title}"):
+            if st.button("Save Results", key=f"save_{title}"):
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 add_df = df.copy()
                 add_df.insert(0, "Trial", title.replace(" Results", ""))
@@ -280,7 +238,7 @@ if page == "Run Trials":
                 add_df["Mutation Rate"] = round(mut, 4)
                 add_df["Total Rating"] = round(total, 4)
                 st.session_state.saved_df = pd.concat([st.session_state.saved_df, add_df], ignore_index=True)
-                st.success("Saved to 'Saved Results' page")
+                st.success("Saved successfully!")
 
     # Run individual trials
     for i, (co, mut, run_btn) in enumerate(controls, start=1):
@@ -288,19 +246,16 @@ if page == "Run Trials":
             df, total = run_pipeline(co, mut, seed=i)
             st.session_state.results[f"Trial {i}"] = (df, total, co, mut)
 
-    # Run all
     if run_all and ratings:
         for i, (co, mut, _) in enumerate(controls, start=1):
             df, total = run_pipeline(co, mut, seed=i)
             st.session_state.results[f"Trial {i}"] = (df, total, co, mut)
 
-    # Show results
     for trial_name in ["Trial 1", "Trial 2", "Trial 3"]:
         if trial_name in st.session_state.results:
             df, total, co, mut = st.session_state.results[trial_name]
             show_results_block(f"{trial_name} Results", co, mut, df, total)
 
-    # Summary
     if len(st.session_state.results) >= 2:
         st.subheader("Summary of Completed Trials")
         summary = pd.DataFrame([
@@ -313,35 +268,23 @@ if page == "Run Trials":
 # SAVED RESULTS PAGE
 # -----------------------------
 else:
-    st.header("💾 Saved Results")
-
+    st.header("Saved Results")
     if st.session_state.saved_df.empty:
-        st.info("No saved results yet. Go to 'Run Trials' and click 'Save Results'.")
+        st.info("No results saved yet. Run trials and click Save Results.")
     else:
         st.dataframe(st.session_state.saved_df, use_container_width=True)
-
         trials_available = sorted(st.session_state.saved_df["Trial"].unique().tolist())
-        st.markdown("**Select trial(s) to delete or download**")
-        selected_trials = st.multiselect(
-            "Choose trial(s)",
-            options=trials_available,
-            default=[],
-            help="Operate on whole trials instead of individual rows"
-        )
+        selected_trials = st.multiselect("Select trial(s)", options=trials_available, default=[])
 
-        # Equal-width buttons styling
         st.markdown("""
             <style>
-                div.stButton > button {
-                    width: 100%;
-                    height: 3em;
-                }
+                div.stButton > button {width: 100%; height: 3em;}
             </style>
         """, unsafe_allow_html=True)
 
         cols = st.columns(4)
         with cols[0]:
-            if st.button("🗑️ Delete Selected Trial(s)"):
+            if st.button("Delete Selected"):
                 if selected_trials:
                     st.session_state.saved_df = st.session_state.saved_df[
                         ~st.session_state.saved_df["Trial"].isin(selected_trials)
@@ -350,31 +293,28 @@ else:
                     st.rerun()
                 else:
                     st.warning("No trials selected.")
-
         with cols[1]:
-            if st.button("🧹 Clear All Saved"):
+            if st.button("Clear All"):
                 st.session_state.saved_df = st.session_state.saved_df.iloc[0:0].copy()
-                st.success("All saved results cleared.")
+                st.success("All results cleared.")
                 st.rerun()
-
         with cols[2]:
             st.download_button(
-                "⬇️ Download All Saved (CSV)",
+                "Download All (CSV)",
                 data=all_saved_to_csv_bytes(st.session_state.saved_df),
-                file_name="saved_trials_combined.csv",
+                file_name="all_saved_trials.csv",
                 mime="text/csv",
             )
-
         with cols[3]:
             if selected_trials:
                 sel_df = st.session_state.saved_df[
                     st.session_state.saved_df["Trial"].isin(selected_trials)
                 ].reset_index(drop=True)
                 st.download_button(
-                    "⬇️ Download Selected Trial(s)",
+                    "Download Selected",
                     data=all_saved_to_csv_bytes(sel_df),
-                    file_name="saved_trials_selected.csv",
+                    file_name="selected_trials.csv",
                     mime="text/csv",
                 )
             else:
-                st.caption("Select trial(s) to enable 'Download Selected Trial(s)'.")
+                st.caption("Select trial(s) to enable download.")
