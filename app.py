@@ -29,7 +29,7 @@ ratings_matrix = ratings_df.values
 # Session state init
 # ==============================
 if "results" not in st.session_state:
-    st.session_state.results = {}  # "Trial 1" -> (df, total_rating, co, mut)
+    st.session_state.results = {}
 
 if "saved_df" not in st.session_state:
     st.session_state.saved_df = pd.DataFrame(
@@ -66,12 +66,10 @@ def mutate(ind, rate):
 def run_ga(co_rate, mut_rate, generations=100, pop_size=50, seed=None):
     if seed is not None:
         random.seed(seed)
-
     pop = [[random.randrange(len(programs)) for _ in range(len(hours))] for _ in range(pop_size)]
     fits = [evaluate(ind) for ind in pop]
     best_idx = max(range(pop_size), key=lambda k: fits[k])
     best, best_fit = pop[best_idx].copy(), fits[best_idx]
-
     for _ in range(generations):
         new_pop = []
         while len(new_pop) < pop_size:
@@ -92,7 +90,6 @@ def run_ga(co_rate, mut_rate, generations=100, pop_size=50, seed=None):
         if fits[gen_best_idx] > best_fit:
             best_fit = fits[gen_best_idx]
             best = pop[gen_best_idx].copy()
-
     chosen_programs = [programs[i] for i in best]
     hour_ratings = per_hour_ratings(best)
     schedule_df = pd.DataFrame({
@@ -120,7 +117,7 @@ def all_saved_to_csv_bytes(saved_df: pd.DataFrame):
 def add_trial_to_saved(trial_name: str, df: pd.DataFrame, total_rating: float, co: float, mut: float):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     add_df = df.copy()
-    add_df.insert(0, "Trial", trial_name)  # Trial 1 / Trial 2 / Trial 3
+    add_df.insert(0, "Trial", trial_name)
     add_df.insert(0, "Saved At", ts)
     add_df["Crossover Rate"] = round(co, 4)
     add_df["Mutation Rate"] = round(mut, 4)
@@ -128,39 +125,28 @@ def add_trial_to_saved(trial_name: str, df: pd.DataFrame, total_rating: float, c
     st.session_state.saved_df = pd.concat([st.session_state.saved_df, add_df], ignore_index=True)
 
 # ==============================
-# UI: Sidebar + Page switcher
+# UI layout
 # ==============================
 st.title("📺 TV Scheduling using Genetic Algorithm")
 
 st.sidebar.header("📄 Page")
 page = st.sidebar.radio("Go to", ["Run Trials", "Saved Results"], index=0)
 
-st.sidebar.header("⚙️ Parameter Settings")
-
 DEFAULT_CO = 0.80
 DEFAULT_MUT = 0.02
 
+# -----------------------------
+# Run Trials Page
+# -----------------------------
 if page == "Run Trials":
-    # --------------------------
-    # Controls
-    # --------------------------
-    st.sidebar.subheader("Trial 1")
-    co_rate1 = st.sidebar.slider("Crossover Rate (Trial 1)", 0.0, 0.95, DEFAULT_CO, 0.01, key="co1")
-    mut_rate1 = st.sidebar.slider("Mutation Rate (Trial 1)", 0.01, 0.05, DEFAULT_MUT, 0.01, key="mut1")
-    run_trial1 = st.sidebar.button("▶ Run Trial 1", key="btn1")
-
-    st.sidebar.subheader("Trial 2")
-    co_rate2 = st.sidebar.slider("Crossover Rate (Trial 2)", 0.0, 0.95, DEFAULT_CO, 0.01, key="co2")
-    mut_rate2 = st.sidebar.slider("Mutation Rate (Trial 2)", 0.01, 0.05, DEFAULT_MUT, 0.01, key="mut2")
-    run_trial2 = st.sidebar.button("▶ Run Trial 2", key="btn2")
-
-    st.sidebar.subheader("Trial 3")
-    co_rate3 = st.sidebar.slider("Crossover Rate (Trial 3)", 0.0, 0.95, DEFAULT_CO, 0.01, key="co3")
-    mut_rate3 = st.sidebar.slider("Mutation Rate (Trial 3)", 0.01, 0.05, DEFAULT_MUT, 0.01, key="mut3")
-    run_trial3 = st.sidebar.button("▶ Run Trial 3", key="btn3")
-
+    st.sidebar.header("⚙️ Parameter Settings")
+    for i in range(1, 4):
+        st.sidebar.subheader(f"Trial {i}")
+        globals()[f"co_rate{i}"] = st.sidebar.slider(f"Crossover Rate (Trial {i})", 0.0, 0.95, DEFAULT_CO, 0.01, key=f"co{i}")
+        globals()[f"mut_rate{i}"] = st.sidebar.slider(f"Mutation Rate (Trial {i})", 0.01, 0.05, DEFAULT_MUT, 0.01, key=f"mut{i}")
+        globals()[f"run_trial{i}"] = st.sidebar.button(f"▶ Run Trial {i}", key=f"btn{i}")
     st.sidebar.markdown("---")
-    run_all = st.sidebar.button("🚀 Run All 3 Trials", key="btn_all")
+    run_all = st.sidebar.button("🚀 Run All 3 Trials")
 
     def df_to_csv_bytes(df):
         b = BytesIO()
@@ -174,14 +160,10 @@ if page == "Run Trials":
         mime="text/csv",
     )
 
-    # --------------------------
-    # Run + persist results
-    # --------------------------
     def show_results(title, co, mut, df, fitness):
         st.subheader(f"{title} (CO_R={co:.2f}, MUT_R={mut:.2f})")
         st.dataframe(df, use_container_width=True)
         st.markdown(f"**Total Rating:** {fitness:.3f}")
-
         cols = st.columns([1, 1, 3])
         with cols[0]:
             st.download_button(
@@ -196,27 +178,16 @@ if page == "Run Trials":
                 add_trial_to_saved(title.replace(" Results", ""), df, fitness, co, mut)
                 st.success("Saved to 'Saved Results' page")
 
-    if run_trial1:
-        df1, fit1 = run_ga(co_rate1, mut_rate1, seed=1)
-        st.session_state.results["Trial 1"] = (df1, fit1, co_rate1, mut_rate1)
-
-    if run_trial2:
-        df2, fit2 = run_ga(co_rate2, mut_rate2, seed=2)
-        st.session_state.results["Trial 2"] = (df2, fit2, co_rate2, mut_rate2)
-
-    if run_trial3:
-        df3, fit3 = run_ga(co_rate3, mut_rate3, seed=3)
-        st.session_state.results["Trial 3"] = (df3, fit3, co_rate3, mut_rate3)
+    # Run trials
+    for i in range(1, 4):
+        if globals()[f"run_trial{i}"]:
+            df, fit = run_ga(globals()[f'co_rate{i}'], globals()[f'mut_rate{i}'], seed=i)
+            st.session_state.results[f"Trial {i}"] = (df, fit, globals()[f'co_rate{i}'], globals()[f'mut_rate{i}'])
 
     if run_all:
-        df1, fit1 = run_ga(co_rate1, mut_rate1, seed=1)
-        df2, fit2 = run_ga(co_rate2, mut_rate2, seed=2)
-        df3, fit3 = run_ga(co_rate3, mut_rate3, seed=3)
-        st.session_state.results = {
-            "Trial 1": (df1, fit1, co_rate1, mut_rate1),
-            "Trial 2": (df2, fit2, co_rate2, mut_rate2),
-            "Trial 3": (df3, fit3, co_rate3, mut_rate3),
-        }
+        for i in range(1, 4):
+            df, fit = run_ga(globals()[f'co_rate{i}'], globals()[f'mut_rate{i}'], seed=i)
+            st.session_state.results[f"Trial {i}"] = (df, fit, globals()[f'co_rate{i}'], globals()[f'mut_rate{i}'])
 
     for trial_name in ["Trial 1", "Trial 2", "Trial 3"]:
         if trial_name in st.session_state.results:
@@ -225,32 +196,24 @@ if page == "Run Trials":
 
     if len(st.session_state.results) >= 2:
         st.subheader("Summary of Completed Trials")
-        summary_rows = []
-        for t, (df, f, c, m) in st.session_state.results.items():
-            summary_rows.append({
-                "Trial": t,
-                "Crossover Rate": c,
-                "Mutation Rate": m,
-                "Total Rating": round(f, 3),
-            })
-        summary_df = pd.DataFrame(summary_rows).sort_values("Trial")
-        st.dataframe(summary_df, use_container_width=True)
+        summary = pd.DataFrame([
+            {"Trial": t, "Crossover Rate": c, "Mutation Rate": m, "Total Rating": round(f, 3)}
+            for t, (df, f, c, m) in st.session_state.results.items()
+        ])
+        st.dataframe(summary, use_container_width=True)
 
+# -----------------------------
+# Saved Results Page
+# -----------------------------
 else:
-    # ==========================
-    # Saved Results page (select trials, not rows)
-    # ==========================
     st.header("💾 Saved Results")
 
     if st.session_state.saved_df.empty:
         st.info("No saved results yet. Go to 'Run Trials' and click 'Save Results'.")
     else:
-        # Show saved data
         st.dataframe(st.session_state.saved_df, use_container_width=True)
 
-        # Unique trials available in saved results
         trials_available = sorted(st.session_state.saved_df["Trial"].unique().tolist())
-
         st.markdown("**Select trial(s) to delete or download**")
         selected_trials = st.multiselect(
             "Choose trial(s)",
@@ -259,7 +222,17 @@ else:
             help="Operate on whole trials instead of individual rows"
         )
 
-        cols = st.columns([1, 1, 2, 2])
+        # Equal width button row
+        st.markdown("""
+            <style>
+                div.stButton > button {
+                    width: 100%;
+                    height: 3em;
+                }
+            </style>
+        """, unsafe_allow_html=True)
+
+        cols = st.columns(4)
         with cols[0]:
             if st.button("🗑️ Delete Selected Trial(s)"):
                 if selected_trials:
@@ -267,27 +240,22 @@ else:
                         ~st.session_state.saved_df["Trial"].isin(selected_trials)
                     ].reset_index(drop=True)
                     st.success(f"Deleted: {', '.join(selected_trials)}")
-                    st.rerun()  # 🔁 instantly refresh page
+                    st.rerun()
                 else:
                     st.warning("No trials selected.")
-
-
         with cols[1]:
             if st.button("🧹 Clear All Saved"):
                 st.session_state.saved_df = st.session_state.saved_df.iloc[0:0].copy()
                 st.success("All saved results cleared.")
-
+                st.rerun()
         with cols[2]:
-            # Download ALL saved
             st.download_button(
                 "⬇️ Download All Saved (CSV)",
                 data=all_saved_to_csv_bytes(st.session_state.saved_df),
                 file_name="saved_trials_combined.csv",
                 mime="text/csv",
             )
-
         with cols[3]:
-            # Download only selected trials
             if selected_trials:
                 sel_df = st.session_state.saved_df[
                     st.session_state.saved_df["Trial"].isin(selected_trials)
