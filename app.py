@@ -186,6 +186,72 @@ def all_saved_to_csv_bytes(saved_df: pd.DataFrame):
     return b.getvalue()
 
 # ==============================
+# MODIFIED CELLS DISPLAY (5 CELLS)
+# ==============================
+# Define your five edited cells (program, hour, new_value) with one decimal place
+MODS = [
+    ("tv_series_a", 20, 0.6),
+    ("live_soccer", 21, 0.6),
+    ("news", 7, 0.3),
+    ("movie_a", 13, 0.4),
+    ("music_program", 23, 0.2),
+]
+
+def rating_of(program: str, hour: int) -> float:
+    """Get rating value from loaded CSV for program at hour."""
+    idx = hour - 6  # hours 6..23 map to 0..17
+    return float(ratings[program][idx])
+
+def build_modified_table():
+    rows = []
+    for prog, hr, new_val in MODS:
+        try:
+            current_val = round(rating_of(prog, hr), 1)
+        except Exception:
+            current_val = None
+        rows.append({
+            "Program": prog,
+            "Hour": f"Hour {hr}",
+            "Rating (from file)": current_val,
+            "Planned New Rating": new_val
+        })
+    return pd.DataFrame(rows)
+
+def build_full_matrix_with_highlight():
+    # Build a matrix Programs x Hour 6..23 (1-decimal)
+    matrix = []
+    for prog, vals in ratings.items():
+        row = {"Program": prog}
+        for hr in range(6, 24):
+            row[f"Hour {hr}"] = round(float(vals[hr - 6]), 1)
+        matrix.append(row)
+    df = pd.DataFrame(matrix).set_index("Program")
+
+    # Highlight MODS cells
+    mod_set = {(p, f"Hour {h}") for (p, h, _) in MODS}
+    def styler_func(s):
+        styles = []
+        for col in s.index:
+            if (s.name, col) in mod_set:
+                styles.append("background-color: #fff3cd; font-weight: 700;")
+            else:
+                styles.append("")
+        return styles
+
+    return df.style.apply(styler_func, axis=1)
+
+def show_modified_cells_section():
+    st.subheader("Modified Ratings (5 Cells)")
+    st.caption("Pulled directly from the loaded CSV (one decimal place).")
+    st.dataframe(build_modified_table(), use_container_width=True)
+    with st.expander("Show full ratings matrix with highlights", expanded=False):
+        try:
+            styled = build_full_matrix_with_highlight()
+            st.dataframe(styled, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not render highlighted matrix: {e}")
+
+# ==============================
 # STREAMLIT UI
 # ==============================
 st.title("TV Program Scheduling using Genetic Algorithm")
@@ -205,6 +271,12 @@ if "saved_df" not in st.session_state:
 # RUN TRIALS PAGE
 # -----------------------------
 if page == "Run Trials":
+    # Show the modified-cells section at the top
+    if ratings:
+        show_modified_cells_section()
+    else:
+        st.warning("Ratings not loaded. Please ensure the CSV file is present.")
+
     st.sidebar.header("Parameter Settings")
     controls = []
     for i in range(1, 4):
@@ -246,16 +318,19 @@ if page == "Run Trials":
             df, total = run_pipeline(co, mut, seed=i)
             st.session_state.results[f"Trial {i}"] = (df, total, co, mut)
 
+    # Run all
     if run_all and ratings:
         for i, (co, mut, _) in enumerate(controls, start=1):
             df, total = run_pipeline(co, mut, seed=i)
             st.session_state.results[f"Trial {i}"] = (df, total, co, mut)
 
+    # Show results
     for trial_name in ["Trial 1", "Trial 2", "Trial 3"]:
         if trial_name in st.session_state.results:
             df, total, co, mut = st.session_state.results[trial_name]
             show_results_block(f"{trial_name} Results", co, mut, df, total)
 
+    # Summary
     if len(st.session_state.results) >= 2:
         st.subheader("Summary of Completed Trials")
         summary = pd.DataFrame([
