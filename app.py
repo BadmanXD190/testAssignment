@@ -153,6 +153,10 @@ if "results" not in st.session_state:
     # Map: "Trial 1" -> (df, total_rating, co_rate, mut_rate)
     st.session_state.results = {}
 
+if "saved_results" not in st.session_state:
+    # Map of saved trials (same structure as results)
+    st.session_state.saved_results = {}
+
 def show_results(title, co, mut, df, fitness):
     st.subheader(f"{title} (CO_R={co:.2f}, MUT_R={mut:.2f})")
     st.dataframe(df, use_container_width=True)
@@ -200,3 +204,70 @@ if len(st.session_state.results) >= 2:
         })
     summary_df = pd.DataFrame(summary_rows).sort_values("Trial")
     st.dataframe(summary_df, use_container_width=True)
+
+# ==============================
+# Drawer footer: Saved Results
+# ==============================
+st.sidebar.markdown("---")
+st.sidebar.header("💾 Saved Results")
+
+def schedule_df_to_csv_bytes(df, trial, co, mut, total_rating):
+    b = BytesIO()
+    out = df.copy()
+    out.insert(0, "Trial", trial)
+    out["Crossover Rate"] = round(co, 4)
+    out["Mutation Rate"] = round(mut, 4)
+    out["Total Rating"] = round(total_rating, 4)
+    out.to_csv(b, index=False)
+    return b.getvalue()
+
+# Save buttons for any completed trials
+if len(st.session_state.results) == 0:
+    st.sidebar.caption("Run a trial, then save it here.")
+else:
+    for t in ["Trial 1", "Trial 2", "Trial 3"]:
+        if t in st.session_state.results:
+            df, f, c, m = st.session_state.results[t]
+            cols = st.sidebar.columns([3, 2])
+            with cols[0]:
+                if t not in st.session_state.saved_results:
+                    if st.sidebar.button(f"Save {t}", key=f"save_{t}"):
+                        st.session_state.saved_results[t] = (df, f, c, m)
+                else:
+                    st.sidebar.success(f"{t} saved")
+
+            # Per-trial CSV download
+            with cols[1]:
+                st.sidebar.download_button(
+                    label="Download CSV",
+                    data=schedule_df_to_csv_bytes(df, t, c, m, f),
+                    file_name=f"{t.replace(' ', '_').lower()}_schedule.csv",
+                    mime="text/csv",
+                    key=f"dl_{t}",
+                )
+
+# Combined CSV for all saved
+if len(st.session_state.saved_results) > 0:
+    def all_saved_to_csv_bytes():
+        b = BytesIO()
+        rows = []
+        for t, (df, f, c, m) in st.session_state.saved_results.items():
+            tmp = df.copy()
+            tmp.insert(0, "Trial", t)
+            tmp["Crossover Rate"] = round(c, 4)
+            tmp["Mutation Rate"] = round(m, 4)
+            tmp["Total Rating"] = round(f, 4)
+            rows.append(tmp)
+        combined = pd.concat(rows, ignore_index=True)
+        combined.to_csv(b, index=False)
+        return b.getvalue()
+
+    st.sidebar.download_button(
+        "⬇️ Download All Saved (CSV)",
+        data=all_saved_to_csv_bytes(),
+        file_name="saved_trials_combined.csv",
+        mime="text/csv",
+        key="dl_all_saved",
+    )
+else:
+    st.sidebar.caption("No saved trials yet.")
