@@ -3,6 +3,7 @@ import pandas as pd
 import random
 from io import BytesIO
 from datetime import datetime
+import re
 
 # ==============================
 # Data loading + exactly 5 edits
@@ -40,6 +41,19 @@ if "saved_df" not in st.session_state:
         ]
     )
 
+# Helper to compute the next saved trial name Trial 1, Trial 2, ...
+def next_saved_trial_name():
+    if st.session_state.saved_df.empty:
+        return "Trial 1"
+    trial_col = st.session_state.saved_df["Trial"].dropna().astype(str)
+    nums = []
+    for t in trial_col:
+        m = re.search(r"(\d+)$", t.strip())
+        if m:
+            nums.append(int(m.group(1)))
+    nxt = max(nums) + 1 if nums else 1
+    return f"Trial {nxt}"
+
 # ==============================
 # Helpers
 # ==============================
@@ -61,7 +75,7 @@ def crossover(p1, p2):
     if len(p1) <= 1:
         return p1.copy(), p2.copy()
     cut = random.randint(1, len(p1) - 1)
-    return p1[:cut] + p2[cut:], p2[:cut] + p1[cut:]
+    return p1[:cut] + p2[cut:], p2[:cut] + p1[:cut] + p2[cut:]
 
 def mutate(ind, rate):
     """Random gene mutation with probability `rate` per hour slot."""
@@ -132,11 +146,11 @@ def all_saved_to_csv_bytes(saved_df: pd.DataFrame):
     saved_df.to_csv(b, index=False)
     return b.getvalue()
 
-def add_trial_to_saved(trial_name: str, df: pd.DataFrame, total_rating: float, co: float, mut: float):
+def add_trial_to_saved(named_trial: str, df: pd.DataFrame, total_rating: float, co: float, mut: float):
     """Append all rows from a trial's schedule into saved_df with metadata + timestamp."""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     add_df = df.copy()
-    add_df.insert(0, "Trial", trial_name)
+    add_df.insert(0, "Trial", named_trial)
     add_df.insert(0, "Saved At", ts)
     add_df["Crossover Rate"] = round(co, 4)
     add_df["Mutation Rate"] = round(mut, 4)
@@ -198,7 +212,8 @@ if page == "Run Trials":
     # Run + persist results
     # --------------------------
     def show_results(title, co, mut, df, fitness):
-        st.subheader(f"{title} (CO_R={co:.2f}, MUT_R={mut:.2f})")
+        # Title uses full words as requested
+        st.subheader(f"{title} (Crossover Rate={co:.2f}, Mutation Rate={mut:.2f})")
         st.dataframe(df, use_container_width=True)
         st.markdown(f"**Total Rating:** {fitness:.3f}")
 
@@ -213,9 +228,11 @@ if page == "Run Trials":
                 key=f"dl_{title}",
             )
         with cols[1]:
-            if st.button("💾 Save to 'Saved Results'", key=f"save_{title}"):
-                add_trial_to_saved(title.replace(" Results", ""), df, fitness, co, mut)
-                st.success("Saved to 'Saved Results' page")
+            # Save Results button: assigns sequential Trial N regardless of which run area
+            if st.button("Save Results", key=f"save_{title}"):
+                trial_name = next_saved_trial_name()
+                add_trial_to_saved(trial_name, df, fitness, co, mut)
+                st.success(f"Saved as {trial_name} in 'Saved Results'")
 
     # Button handlers
     if run_trial1:
@@ -267,7 +284,7 @@ else:
     st.header("💾 Saved Results")
 
     if st.session_state.saved_df.empty:
-        st.info("No saved results yet. Go to 'Run Trials' and click 'Save to Saved Results'.")
+        st.info("No saved results yet. Go to 'Run Trials' and click 'Save Results'.")
     else:
         # Show table
         st.dataframe(st.session_state.saved_df, use_container_width=True)
@@ -282,7 +299,7 @@ else:
 
         cols = st.columns([1, 1, 2, 2])
         with cols[0]:
-            if st.button("🗑️ Delete Selected"):
+            if st.button("Delete Selected"):
                 if len(selected_indices) > 0:
                     st.session_state.saved_df = st.session_state.saved_df.drop(index=selected_indices).reset_index(drop=True)
                     st.success("Selected rows deleted.")
@@ -290,13 +307,13 @@ else:
                     st.warning("No rows selected.")
 
         with cols[1]:
-            if st.button("🧹 Clear All Saved"):
+            if st.button("Clear All Saved"):
                 st.session_state.saved_df = st.session_state.saved_df.iloc[0:0].copy()
                 st.success("All saved results cleared.")
 
         with cols[2]:
             st.download_button(
-                "⬇️ Download Saved as CSV",
+                "Download Saved as CSV",
                 data=all_saved_to_csv_bytes(st.session_state.saved_df),
                 file_name="saved_trials_combined.csv",
                 mime="text/csv",
@@ -307,7 +324,7 @@ else:
             if len(selected_indices) > 0:
                 sel_df = st.session_state.saved_df.loc[selected_indices].reset_index(drop=True)
                 st.download_button(
-                    "⬇️ Download Selected Rows",
+                    "Download Selected Rows",
                     data=all_saved_to_csv_bytes(sel_df),
                     file_name="saved_trials_selected.csv",
                     mime="text/csv",
